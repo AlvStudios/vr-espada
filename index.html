@@ -3,119 +3,90 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Espada en el Objeto Verde Más Cercano</title>
+    <title>Mano y Espada</title>
     <style>
         body { margin: 0; overflow: hidden; }
-        #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-        #swordCanvas { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 2; }
+        #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        #swordCanvas { position: absolute; pointer-events: none; }
     </style>
 </head>
 <body>
-    <video id="video" autoplay muted playsinline></video>
+    <video id="video" autoplay></video>
     <canvas id="swordCanvas"></canvas>
 
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.3.0/dist/tf.min.js"></script>
+    <!-- Incluir handtrack.js desde un CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/handtrackjs@0.0.9/dist/handtrack.min.js"></script>
     <script>
-        const video = document.getElementById('video');
-        const canvas = document.getElementById('swordCanvas');
-        const context = canvas.getContext('2d');
+        // Configuración del modelo de detección
+        const modelParams = {
+            flipHorizontal: true,   // Espejar horizontalmente
+            maxNumBoxes: 1,          // Número máximo de manos detectadas
+            iouThreshold: 0.5,       // Umbral de superposición
+            scoreThreshold: 0.6,     // Umbral de puntuación de confianza
+        };
+        
+        let model;
 
-        // Crear una imagen de espada
-        const swordImage = new Image();
-        swordImage.src = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAAgAAADAAAAAElFTkSuQmCC'; // Cambia esta línea con la URL o base64 de tu imagen de espada
-
+        // Inicializar el modelo y la cámara
         async function init() {
+            model = await handTrack.load();
             await startVideo();
-
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-
-            detectGreenObject();
+            detectHand();
         }
 
+        // Iniciar la cámara
         function startVideo() {
             return new Promise((resolve, reject) => {
                 navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
                     .then(stream => {
-                        video.srcObject = stream;
-                        video.onloadedmetadata = () => {
-                            video.play();
-                            resolve();
-                        };
+                        document.getElementById('video').srcObject = stream;
+                        document.getElementById('video').onloadedmetadata = () => resolve();
                     })
-                    .catch(err => {
-                        console.error('Error accessing camera:', err);
-                        reject(err);
-                    });
+                    .catch(err => reject(err));
             });
         }
 
+        // Ajustar el tamaño del canvas
+        function resizeCanvas() {
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('swordCanvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        // Dibujar la espada
         function drawSword(x, y) {
+            const canvas = document.getElementById('swordCanvas');
+            const context = canvas.getContext('2d');
             context.clearRect(0, 0, canvas.width, canvas.height);
 
             // Dibujar la espada en el canvas
-            context.drawImage(swordImage, x - swordImage.width / 2, y - swordImage.height / 2);
+            context.strokeStyle = 'green';  // Cambiado a verde
+            context.lineWidth = 5;
+            context.beginPath();
+            context.moveTo(x, y - 20);
+            context.lineTo(x, y + 80);
+            context.moveTo(x - 10, y - 10);
+            context.lineTo(x + 10, y - 10);
+            context.moveTo(x - 10, y + 80);
+            context.lineTo(x + 10, y + 80);
+            context.stroke();
         }
 
-        function drawDebugRect(x, y, width, height) {
-            context.strokeStyle = 'cyan'; // Color del rectángulo de depuración
-            context.lineWidth = 2;
-            context.strokeRect(x, y, width, height);
-        }
+        // Detectar la mano
+        function detectHand() {
+            model.detect(document.getElementById('video')).then(predictions => {
+                if (predictions.length > 0) {
+                    const hand = predictions[0].bbox; // Caja delimitadora de la mano
+                    const x = hand[0] + hand[2] / 2;
+                    const y = hand[1] + hand[3] / 2;
 
-        function detectGreenObject() {
-            function processFrame() {
-                context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const frame = context.getImageData(0, 0, canvas.width, canvas.height);
-                const data = frame.data;
-
-                let minDistance = Infinity;
-                let closestPoint = { x: -100, y: -100 };
-                let minX = canvas.width;
-                let minY = canvas.height;
-                let maxX = 0;
-                let maxY = 0;
-
-                for (let i = 0; i < data.length; i += 4) {
-                    const r = data[i];
-                    const g = data[i + 1];
-                    const b = data[i + 2];
-
-                    // Detección de verde: valores altos en G, valores bajos en R y B
-                    if (g > 100 && r < 80 && b < 80) {
-                        const x = (i / 4) % canvas.width;
-                        const y = Math.floor((i / 4) / canvas.width);
-
-                        const distance = Math.sqrt(Math.pow(x - canvas.width / 2, 2) + Math.pow(y - canvas.height / 2, 2));
-
-                        if (distance < minDistance) {
-                            minDistance = distance;
-                            closestPoint = { x, y };
-
-                            // Actualizar límites del rectángulo de depuración
-                            if (x < minX) minX = x;
-                            if (y < minY) minY = y;
-                            if (x > maxX) maxX = x;
-                            if (y > maxY) maxY = y;
-                        }
-                    }
+                    drawSword(x, y);
                 }
-
-                // Ajustar el tamaño del rectángulo
-                const width = maxX - minX;
-                const height = maxY - minY;
-
-                if (minDistance < Infinity) {
-                    drawSword(closestPoint.x, closestPoint.y);
-                    drawDebugRect(minX, minY, width, height);
-                } else {
-                    drawSword(-100, -100); // Coloca la espada fuera de la vista si no hay objeto verde
-                }
-
-                requestAnimationFrame(processFrame);
-            }
-
-            processFrame();
+                requestAnimationFrame(detectHand);
+            });
         }
 
         init();
